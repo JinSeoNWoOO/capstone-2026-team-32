@@ -1,0 +1,27 @@
+# LS 실시간 뉴스·공시 속보 수집기 설정. 이 파일의 경로는 저장소 루트 기준이다.
+# 수집기는 뉴스를 받아 data/newsgap.db 에 적기만 한다 — 판단 지원(advisor)이 그 DB 를 읽는다.
+# 주문 경로는 없다 (뉴스 자동매매를 없애면서 env·signal·risk·cost·ai 블록도 뺐다).
+
+ls:
+  rest_base: https://openapi.ls-sec.co.kr:8080      # 토큰 발급에만 쓴다
+  ws_url_live: wss://openapi.ls-sec.co.kr:9443/websocket
+  ws_url_paper: wss://openapi.ls-sec.co.kr:29443/websocket
+  data_key: paper                  # 뉴스 수신에 쓰는 키. 모의 서버에서 NWS가 안 오면 live로 (읽기 전용)
+  # 키는 .env 의 LS_PAPER_APP_KEY / LS_PAPER_APP_SECRET / LS_LIVE_APP_KEY / LS_LIVE_APP_SECRET 에서 읽는다 (.env.example 참고).
+  # 아래 파일 경로는 환경변수가 없을 때의 폴백. .env, secrets/ 모두 커밋 금지.
+  env_file: .env
+  paper_app_key_file: ./secrets/ls_paper_app_key.txt
+  paper_app_secret_file: ./secrets/ls_paper_app_secret.txt
+  live_app_key_file: ./secrets/ls_live_app_key.txt
+  live_app_secret_file: ./secrets/ls_live_app_secret.txt
+
+collector:
+  reauth_time: "07:05:00"   # 토큰이 익일 07:00 만료 → 이 시각에 재발급·재접속
+  commit_interval_sec: 5
+  heartbeat_sec: 60
+  raw_dir: ./data/raw       # YYYYMMDD.ls.jsonl(원본 프레임) / YYYYMMDD.stream.jsonl(뉴스·장운영)
+  mock: false               # true면 backend/newsgap_tools/mock_ls_ws.py 에 붙는다 (키 불필요)
+  mock_ws_url: ws://127.0.0.1:8765/websocket
+
+storage:
+  sqlite_path: ./data/newsgap.db          # 실수집 DB (지우지 않고 이어 씀)
