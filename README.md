@@ -386,6 +386,7 @@ Linux/WSL에서는 `py -3.12` 대신 `python3.12`, `.venv-new\Scripts\python.exe
 ### 7.1. 팀원별 소개 및 역할 분담
  
 진선우, wlstjsdn11@pusan.ac.kr, 팀장, 알고리즘 설계, 프론트엔드 개발
+
 강무진, fromzero@pusan.ac.kr, 백엔드 개발
 
 ### 7.2. 팀원 별 참여 후기
