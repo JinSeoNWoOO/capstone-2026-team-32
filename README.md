@@ -397,7 +397,7 @@ Linux/WSL에서는 `py -3.12` 대신 `python3.12`, `.venv-new\Scripts\python.exe
 강무진
 - 양질의 데이터를 얻기가 쉽지 않았고 특히 과거의 데이터는 대부분 축약되어 있거나 깨진 상태가 많아 학습이나 테스트하기에 적합하지 않았다.
 - 실시간 데이터(뉴스, 주식)를 API를 통해 인터럽트 방식으로 구할 수 없고 API 제한, 네트워크 지연, 원천 데이터와 뉴스 보도 간의 시간 지연, (주식 매매 왕복 비용 + API 비용 (+ 클라우드 서버 비용(잠재적))) 으로 인해 뉴스 호재 트리거를 이용한 단타 매매 또는 스캘핑의 실현 가능성이 작은 것을 깨달았다.
-- 실제 재무 데이터나 증시 지수 등의 데이터를 활용하면 안정성을 높여 크게 벌기 힘들지만 그만큼 지수에 비해 안정성이 올라간다는 것을 확인했다.
+- 지수보다 크게 벌기는 어렵지만, 최대 낙폭은 지수의 절반 수준(−22.0% vs −40.8%)으로 줄어드는 것을 확인했다.
 
 ## 8. 참고 문헌 및 출처
 1. A. Atkins, M. Niranjan, and E. Gerding, "Financial news predicts stock market volatility better than close price," The Journal of Finance and Data Science, Vol. 4, No. 2, pp. 120-137, 2018. doi:10.1016/j.jfds.2018.02.002.
