@@ -80,7 +80,7 @@ NA Trader는 국내 주식 데이터를 수집하고 **시장 → 섹터 → 종
 
 ### 3.1. 시스템 구성도
 
-![국내 자동매매 시스템의 구성과 KIS 연동 경로](docs/figures/system-architecture.png)
+![국내 자동매매 시스템의 구성과 KIS 연동 경로](docs/system-architecture.png)
 
 사용자는 React·Vite 화면에서 FastAPI를 통해 시세·잔고·주문과 자동매매를 제어합니다. 수동매매 서비스와 자동매매 엔진은 공통 KIS 연동 계층을 사용하여 한국투자증권 모의투자 서버에 접근합니다. 그림의 CLIENT/BACKEND 구획은 기능 흐름을 표현하며, **FastAPI는 서버에서 실행되는 백엔드 구성요소**입니다.
 
