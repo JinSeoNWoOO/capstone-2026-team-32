@@ -1,0 +1,69 @@
+# 뉴스 자동매매 모드의 수집기 설정. 이 파일의 경로는 저장소 루트 기준이다.
+# 주문은 이 설정이 아니라 KIS 경로(.env 의 KIS_ORDER_MODE)가 관장한다 — 여기 env 는 수집기 자체의 모드다.
+# ENV: shadow  = 신호·주문 의도만 기록, 실제 주문 없음
+#      paper   = 모의투자 서버에 주문 (모의 키 필요, 주문 TR 미구현)
+#      live    = 차단됨 (MVP 기간에는 Executor가 예외를 던짐)
+env: shadow
+
+ls:
+  rest_base: https://openapi.ls-sec.co.kr:8080
+  ws_url_live: wss://openapi.ls-sec.co.kr:9443/websocket
+  ws_url_paper: wss://openapi.ls-sec.co.kr:29443/websocket
+  data_key: paper                  # 뉴스·체결 수신에 쓰는 키. 모의 서버에서 NWS가 안 오면 live로 (읽기 전용, 주문 경로와 분리)
+  # 키는 .env 의 LS_PAPER_APP_KEY / LS_PAPER_APP_SECRET / LS_LIVE_APP_KEY / LS_LIVE_APP_SECRET 에서 읽는다 (.env.example 참고).
+  # 아래 파일 경로는 환경변수가 없을 때의 폴백. .env, secrets/ 모두 커밋 금지.
+  env_file: .env
+  paper_app_key_file: ./secrets/ls_paper_app_key.txt
+  paper_app_secret_file: ./secrets/ls_paper_app_secret.txt
+  live_app_key_file: ./secrets/ls_live_app_key.txt
+  live_app_secret_file: ./secrets/ls_live_app_secret.txt
+  paper_ws_port: 29443
+  live_ws_port: 9443
+
+collector:
+  nxt: true                 # NXT(넥스트레이드) 체결 NS3·VI NVI 도 등록 (08:00 프리마켓 체결 포착)
+  snapshot: true            # 뉴스 직후 t1101 스냅샷 + t8412 1분봉으로 기준선·직전 분봉 종가 보강
+  baseline_bars: 20         # 기준선 = 직전 N개 1분봉 거래대금의 중앙값
+  reauth_time: "07:05:00"   # 토큰이 익일 07:00 만료 → 이 시각에 재발급·재접속
+  commit_interval_sec: 5
+  heartbeat_sec: 60
+  raw_dir: ./data/raw       # YYYYMMDD.ls.jsonl(원본) / YYYYMMDD.stream.jsonl(정규화, replay 가능)
+  mock: false               # true면 tools/mock_ls_ws.py 에 붙는다 (키 불필요)
+  mock_ws_url: ws://127.0.0.1:8765/websocket
+
+storage:
+  sqlite_path: ./data/newsgap.db          # 실수집 DB (live 모드, 지우지 않고 이어 씀)
+  replay_sqlite_path: ./data/replay.db    # replay 전용 (실행마다 새로 만듦)
+
+event:
+  window_sec: 600          # 뉴스 후 구독 유지 시간
+
+signal:
+  entry_delay_sec: 10      # 뉴스 후 이 시점에 1회 진입 판단
+  amount_mult: 5.0         # 직전 1분 거래대금 / 기준선
+  buy_ratio_min: 0.6       # 매수 체결 비중 하한
+  pre_spike_window_sec: 120   # 뉴스 수신 전 이 구간(초)의 체결(t1301)로 "이미 급증했는지"를 본다
+  pre_spike_max_mult: 3.0     # 그 구간 10초 거래량이 기준선(1분봉 거래량 중앙값/6)의 이 배수 이상이면 진입 금지
+  require_prespike: true      # true면 급증 배수를 못 구한 이벤트도 진입하지 않는다 (SKIP no_prespike_data)
+  max_hold_sec: 300        # 최대 보유
+  stop_pct: -1.5           # 손절 (%)
+  decay_from_peak: 0.25    # 매수비중 30초 이동평균이 정점 대비 이만큼 떨어지면 청산
+
+risk:
+  max_positions: 1
+  max_order_krw: 1000000
+  daily_loss_limit_krw: -30000
+  no_entry_after: "15:15:00"
+  force_exit_at: "15:20:00"
+
+cost:
+  round_trip_pct: 0.23     # 거래세 0.20 + 수수료 0.03
+
+ai:
+  enabled: true                   # false면 NullJudge(항상 BUY) = 규칙 기반과 동일
+  model: gemini-3.5-flash-lite    # 짧은 제목 분류 → 현행 세대 Flash-Lite (더 싸게: gemini-3.1-flash-lite)
+  api_key_env: GEMINI_API_KEY     # .env 에서 읽는 키 이름 (없으면 GOOGLE_API_KEY 도 본다)
+  timeout_sec: 6                  # 응답 제한. 넘으면 ERROR → SKIP 처리 + counterfactual 기록
+  max_wait_sec: 10                # 진입 판단이 AI 응답을 기다리는 최대 시간 (entry_delay 이후)
+  prompt_ver: v1
+  thinking_level: MINIMAL         # Gemini 3.x thinking 최소화(지연). 2.5-* 모델로 바꾸면 빈 값으로 끌 것

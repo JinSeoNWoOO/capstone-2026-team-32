@@ -1,0 +1,330 @@
+# 판단 지원(advisor) 모드의 v0 설정 전부. 이 파일의 경로는 저장소 루트 기준이다.
+# 코드에 숫자를 박지 않는다 (설계 3장) — 여기 값이 바뀌면 config_hash 가 바뀌고 모든 실행 기록에 남는다 (결정 6).
+# 블록마다 근거가 된 결정 번호를 적어 둔다. 결정 본문은 docs/concept-decisions.md 참고.
+config_note: "v0"
+
+# 저장 위치. newsgap.db 는 수집기가 쓰는 DB라 advisor 는 읽기만 한다 (설계 2.1).
+# ledger 는 판단 해시 사슬을 덧붙이는 파일이고 git 으로 추적한다 (결정 13).
+paths:
+  db: ./data/advisor.db
+  newsgap_db: ./data/newsgap.db
+  ledger: ./ledger/advisor_ledger.jsonl
+
+# 하루 두 번 판단 (결정 11). prelim 은 당일 확정 데이터, final 은 밤사이 정보까지.
+# fallback_deadline 까지 final 이 끝나지 않으면 전날 prelim 판단을 체결 예약으로 승격한다.
+# poll_* 은 DART 공시 목록 주기 조회 (설계 12장: 영업일 07:30~18:10, 10분 간격).
+schedule:
+  prelim: "18:30"
+  final: "07:40"
+  fallback_deadline: "08:50"
+  poll_interval_min: 10
+  poll_window: ["07:30", "18:10"]
+
+# 휴장일. 주말은 코드가 걸러내므로 여기에는 평일 휴장일만 적는다 (결정 11: 휴장일은 판단을 건너뛴다).
+# 2026-09-22 확인 결과(설계 11장): 9/24·9/25 휴장, 9/28(월)은 정상 개장(대체공휴일 아님),
+# 10/5 는 개천절 대체공휴일로 휴장. 연내 나머지는 10/9·12/25·12/31.
+# 확인 필요: 2027년 이후 목록은 아직 없다. 해가 바뀌기 전에 KRX 휴장일 공지로 채워야 한다.
+# 과거 날짜는 market_daily(series='KOSPI') 에 데이터가 있으면 그쪽이 이긴다 (calendar.py).
+calendar:
+  holidays: ["2026-09-24", "2026-09-25", "2026-10-05", "2026-10-09", "2026-12-25", "2026-12-31"]
+
+# 대상 범위 (결정 8). 섹터 분류는 섹터 ETF 의 구성 종목으로 대신한다.
+# 인버스·레버리지는 1차 범위에서 제외 — 하락 국면은 현금 비중으로 대응한다.
+universe:
+  stock_index: "1028"            # 코스피200
+  core_etf: "069500"             # KODEX 200 — 종목을 고르지 않고 시장을 그대로 담는 핵심 몫
+  cash_etf: "459580"             # 현금 대용 (CD금리 ETF)
+  sector_etfs:
+    반도체: "091160"
+    2차전지: "305720"
+    자동차: "091180"
+    은행: "091170"
+    바이오: "244580"
+    방산: "449450"
+    조선: "466920"
+  other_etfs:
+    코스닥150: "229200"
+    금: "132030"
+    달러: "261240"
+    미국S&P500: "360750"
+  # --- 아래는 KRX 로그인이 안 될 때의 대체 경로다 (설계 12장의 "섹터 ETF 구성 종목 조회 실패" 대비).
+  # 2026-09-22 확인: pykrx 1.2.9 는 KRX 로그인을 요구하고, 로그인 없이는 코스피200 구성 종목
+  # (get_index_portfolio_deposit_file)·섹터 ETF PDF 를 못 받는다. 대체 경로를 탄 실행은
+  # run.note 의 fallbacks_used 에 남아, 결정 8(코스피200)에서 벗어났다는 사실이 기록된다.
+  # fallback_top_n: 코스피 시가총액 상위 N 종목으로 코스피200 을 대신한다.
+  fallback_top_n: 200
+  # 섹터 ETF 구성 종목(PDF) 중 우리 종목 범위 안에 드는 것이 이 수보다 적으면 수작업 표로 보강한다.
+  # 2026-09-22 확인: KODEX 반도체 22종목 중 코스피200 에 든 것은 4개뿐이고 나머지는 코스닥이다 —
+  # 섹터 점수(설계 5.2의 sec_flow)가 두세 종목으로 결정되면 순위가 잡음이 된다.
+  min_sector_members: 3
+  # 상위 N 을 고를 때 빼는 종목. 우선주는 코드 끝자리가 0 이 아닌 것으로 걸러지고(2026-09-22 확인:
+  # 코스피 942종목 중 끝자리≠0 인 111종목이 정확히 이름에 '우'가 든 우선주 집합과 일치),
+  # 이름 패턴은 스팩·리츠·인프라 펀드처럼 '주식이 아닌 것'을 뺀다. '메리츠'가 '리츠'에 걸리지
+  # 않도록 앞 글자를 확인한다.
+  exclude_name_suffix_nonzero_code: true
+  exclude_name_patterns: ["스팩", "기업인수목적", "(?<!메)리츠", "인프라$", "맥쿼리인프라"]
+  # 섹터 ETF PDF 를 못 받을 때 쓰는 수작업 섹터 표. 코드는 2026-09-22 FinanceDataReader 의
+  # 코스피 목록(942종목)과 스크립트로 대조해 **종목명이 의도와 일치하는 것만** 넣었다 (기억으로 적은
+  # 코드는 넣지 않는다). 한 종목은 한 섹터에만 들어가고, 여러 섹터에 있으면 이 파일의 등장 순서가 이긴다.
+  # 대표성은 시가총액 상위 위주이며 완전한 분류가 아니다 — 어디까지나 로그인 실패 시의 대체물이다.
+  sector_map_manual:
+    반도체:  ["005930", "000660", "042700", "000990", "007660", "353200", "281820", "009150"]
+    2차전지: ["373220", "006400", "051910", "003670", "066970", "450080", "020150", "011790"]
+    자동차:  ["005380", "000270", "012330", "018880", "204320", "005850", "161390", "073240", "011210", "007340"]
+    은행:    ["105560", "055550", "086790", "316140", "024110", "323410", "138930", "175330", "139130", "279570"]
+    바이오:  ["207940", "068270", "128940", "326030", "000100", "006280", "302440", "009420", "069620", "185750"]
+    방산:    ["012450", "047810", "079550", "064350", "272210", "103140"]
+    조선:    ["329180", "009540", "010140", "042660", "082740", "443060", "071970", "439260"]
+
+# 수집 (설계 2.3·3장). 제공자를 바꿔도 이 블록만 고치면 되게 한다.
+#
+# known_at 세 값이 시점 규칙의 전부다 (sources/base.py 머리말 참고).
+#   daily_bar_known_at: 국내 일봉 D일자는 D일 이 시각에 확정 → 18:30 예비는 당일까지, 07:40 최종은 전날까지 본다.
+#   us_bar_known_at:    미국 일봉 D일자는 D+1일 이 시각에 확정 (미국 장 마감이 한국 새벽 6시쯤).
+#   fx_known_at:        원/달러는 24시간 거래라 당일 봉이 항상 미완성 → 기준일보다 앞선 날짜만 쓴다.
+# 이 값을 늦추면 데이터가 줄고 당기면 미래를 본다. 함부로 바꾸지 말 것.
+sources:
+  daily_bar_known_at: "18:00"
+  us_bar_known_at: "07:00"
+  fx_known_at: "00:00"
+  # 처음 채울 때 거슬러 올라가는 길이. 종목 일봉은 stk_high52 의 250거래일 + 여유,
+  # 지수는 시장 요인의 과거 백분위(normalize.hist_window_years 5년)보다 넉넉해야 한다.
+  backfill_days: 320
+  index_backfill_years: 6
+  overnight_backfill_years: 6
+  # KRX 로그인. pykrx 는 import 하는 순간 로그인을 시도하고 로그인 ID 를 stdout 에 찍으므로
+  # 코드가 직접 한 번만 시도하고 출력을 삼킨다. 실패하면 그 실행에서는 다시 시도하지 않는다 (계정 잠금 방지).
+  krx_login_env: ["KRX_ID", "KRX_PW"]
+  krx_min_interval_sec: 1.0       # pykrx 호출 간격. KRX 웹서버에 부담을 주지 않기 위해 넉넉히.
+  # 날짜별 전 종목 조회(거래대금·시가총액 보강용)를 몇 일치까지 할 것인가. 백필처럼 빈 구간이
+  # 길면 건너뛴다 — 하루당 한 번씩 부르면 수백 번이 된다.
+  krx_bulk_max_days: 5
+  bulk_cache_days: 10             # 같은 배치 안에서 날짜별 전 종목 결과를 재사용할 최대 일수
+  krx_market: "KOSPI"
+  krx_investor_foreign: "외국인"
+  krx_investor_institution: "기관합계"
+  # 종목 일봉의 뼈대를 받는 곳. 2026-09-22 확인: pykrx 의 '날짜별 전 종목' 조회는 **원주가**라
+  # 액면분할이 있으면 52주 고가·이동평균이 깨진다. 수정주가를 주는 종목별 경로를 뼈대로 쓰고,
+  # 거래대금·시가총액만 날짜별 전 종목에서 보강한다.
+  #   fdr   = FinanceDataReader (로그인 불필요, 수정 종가, 호출당 ~0.14s) — 기본
+  #   pykrx = pykrx 종목별 (adjusted=True → 같은 Naver 출처)
+  price_ticker_provider: "fdr"
+  # 수정주가는 기업행위가 생기면 **과거 값이 소급 변경**된다. 그래서 이미 받아 둔 구간이라도
+  # 최근 이만큼은 매 배치에서 다시 받아, 값이 바뀐 행만 새 knowledge_time 으로 갱신되게 한다
+  # (store.py 의 upsert 규칙: 값이 그대로면 인지 시각을 건드리지 않는다).
+  adj_refresh_days: 20
+  # KIS 모의투자 서버. 초당 호출 제한이 있어 호출 사이에 최소 간격을 둔다.
+  kis_min_interval_sec: 0.25
+  kis_chart_max_rows: 50          # 2026-09-22 실측: 기간을 넓게 줘도 최근 50행만 온다
+  kis_adj_price: "0"              # FID_ORG_ADJ_PRC — "0" 수정주가, "1" 원주가
+  kis_index_code: "0001"          # 코스피 지수
+  # 투자자별 매매동향(FHKST01010900)의 *_tr_pbmn 은 백만원 단위다.
+  # 2026-09-22 검산: 삼성전자 9/21 외국인 순매수 4,080,410주 × 274,000원 ≒ 1.118e12원, 응답값 1,106,291 → 배수 1e6.
+  kis_net_value_unit_krw: 1000000
+  # 거래대금(value)은 v0 요인 어디에도 쓰이지 않아 기본은 받지 않는다 (호출 수를 두 배로 만든다).
+  # 켜면 종목마다 KIS 일봉을 한 번 더 불러 acml_tr_pbmn 을 채운다.
+  price_value_from_kis: false
+  # OpenDART 공시 목록. corp_cls Y = 유가증권시장. 키가 없으면 빈 결과로 물러선다.
+  dart_api_key_env: "DART_API_KEY"
+  dart_list_url: "https://opendart.fss.or.kr/api/list.json"
+  dart_page_count: 100            # 한 페이지 최대 100
+  dart_max_pages: 20
+  dart_corp_cls: "Y"
+  dart_lookback_days: 3           # 최종·예비 배치가 훑는 최근 며칠 (정정·지연 접수 대비)
+  # OpenDART 정기보고서 재무 (2026-09-28 추가, 관찰 요인 stk_earn_growth 의 재료 — sources/dart_fin.py).
+  # 다중회사 주요계정 API 는 한 번에 고유번호 100개 × 보고서 하나. 코스피200 이면 보고서당 3회다.
+  dart_corp_url: "https://opendart.fss.or.kr/api/corpCode.xml"
+  dart_fin_url: "https://opendart.fss.or.kr/api/fnlttMultiAcnt.json"
+  dart_fin_start_year: 2024       # 재현 기간(2026-04~)의 전년 동기 비교와 2024년 4분기(=연간−3분기 누적)까지
+  dart_fin_chunk: 100             # 한 번에 묻는 고유번호 수 (API 최대 100)
+  dart_fin_max_calls: 300         # 한 수집에서 재무·공시일 조회에 쓰는 최대 호출 수 (첫 백필 ≈ 130회)
+  # 인지 시각: 공시일(rcept_dt) 다음 날 00:00. 공시 시각을 모르므로 공시일 당일 예비 판단에는 쓰지 않는다.
+  dart_fin_known_days_after: 1
+  dart_fin_known_at: "00:00"
+  # 공시일을 끝내 못 찾으면 접수번호 날짜에 이만큼 더한 날을 공시일로 본다 (장 마감 뒤 접수분은 다음
+  # 영업일 공시라 접수번호 날짜가 공시일보다 빠를 수 있다 — 연휴를 넘길 만큼 넉넉히).
+  dart_fin_fallback_days: 7
+  # 기간 끝에서 이만큼 지난 뒤에도 없던 보고서는 더 묻지 않는다 (법정 기한: 분기 45일, 사업 90일).
+  dart_fin_giveup_days: 150
+  # 응답의 account_nm(공백 무시) → 계정 키. 손익계산서 행만 본다.
+  dart_fin_accounts:
+    revenue: ["매출액", "수익(매출액)"]
+    op_income: ["영업이익", "영업이익(손실)"]
+    net_income: ["당기순이익", "당기순이익(손실)"]
+  # LS 뉴스(newsgap.db) 를 훑는 창. 공시 속보는 48시간, 뉴스 분류용 조회는 24시간.
+  lsnews_window_hours: 48
+  news_window_hours: 24
+  # yfinance 계열 이름 → 티커. 이름은 market_daily.series 에 그대로 들어간다 (설계 8장).
+  # ^KS11 은 하루 늦게 갱신돼 쓰지 않는다 — 코스피는 KIS 지수 일봉으로 받는다.
+  overnight_tickers:
+    SP500: "^GSPC"
+    SOX: "^SOX"
+    USDKRW: "KRW=X"
+  http_timeout_sec: 15
+
+# 요인 메타데이터 (결정 12). id → 계층·가중치·부호·채점 주 기간·변환·출처.
+# weight 는 결정 6의 근거 등급이다: 강함 2, 중간 1, 관찰 요인 0 (0 도 점수는 저장하고 가중 합에서만 뺀다).
+# sign 은 문헌 근거로 미리 고정한 부호 방향이고 (결정 9), horizon 은 채점 주 기간(거래일)이다.
+# transform: rank(같은 날 대상 안의 순위) | hist_pct(자기 과거 분포 백분위) | rule(조건 참/거짓) | rubric(LLM 5단계 기준표)
+# stages 가 있으면 그 단계에서만 값이 있다 — mkt_overnight 이 prelim 에서 결측인 것이 곧
+# "밤사이 정보의 기여"를 재는 실험 설계다 (결정 11·14의 기준선 5번).
+factors:
+  mkt_trend:      {layer: market, weight: 2, sign: 1,  horizon: 20, transform: rule,     params: {ma_days: 200}, source: "Faber 2007: 이동평균 현금 전환으로 최대 낙폭 -46% → -9.5%"}
+  mkt_vol:        {layer: market, weight: 1, sign: -1, horizon: 20, transform: hist_pct, params: {window: 20}, source: "변동성 관리 포트폴리오 (Moreira & Muir 2017, Cederburg 등 반론 있음)"}
+  mkt_overnight:  {layer: market, weight: 1, sign: 1,  horizon: 5,  transform: hist_pct, params: {}, stages: [final], source: "시초가 영향은 경험적 사실, 5일 예측력은 검증 대상"}
+  mkt_credit:     {layer: market, weight: 0, sign: -1, horizon: 20, transform: hist_pct, params: {}, source: "신용잔고·예탁금 비율 과열은 실무 통설, 학술 근거 약함 (관찰 요인)"}
+  sec_flow:       {layer: sector, weight: 1, sign: 1,  horizon: 10, transform: rank,     params: {days: 20}, source: "국내 수급 연구 다수, 효과 크기는 불확실"}
+  sec_trend:      {layer: sector, weight: 1, sign: 1,  horizon: 20, transform: rule,     params: {ma_days: 200}, source: "추세 신호는 지수·ETF 단위에서 유효 (결정 2)"}
+  stk_high52:     {layer: stock,  weight: 2, sign: 1,  horizon: 20, transform: rank,     params: {lookback: 250}, source: "George & Hwang 2004, 한국 PEAD·52주 신고가, 심리적 가격 장벽 (Lobão & Couto 2019)"}
+  stk_flow:       {layer: stock,  weight: 1, sign: 1,  horizon: 10, transform: rank,     params: {days: 20}, source: "국내 수급 연구 다수, 효과 크기는 불확실"}
+  # 2026-09-28: stk_earn_growth 를 관찰 요인으로 추가 (결정 6·12). 가중치 0 이라 판단·비중은 바뀌지 않고
+  # 설정 지문(config_hash)만 바뀐다 — 의도된 변경이다. 가중치는 재평가(docs/experiments/fin-factor-2026-09-28.md)를 보고 사람이 정한다.
+  # 정의는 증가율이 아니라 (직전 분기 영업이익 − 전년 동기) ÷ 시가총액 — 기준값이 0·음수 근처에서 증가율이 폭주하기 때문 (factors/stock.py).
+  stk_earn_growth: {layer: stock, weight: 0, sign: 1,  horizon: 60, transform: rank,     params: {account: op_income, max_age_days: 200}, source: "한국 PEAD(실적 발표 후 드리프트) 연구; 가격 척도 이익 변화(계절 랜덤워크 서프라이즈 ÷ 시가총액) — 증가율은 기준값 0·음수에서 폭주해 대체 (관찰 요인, 2026-09-28 추가)"}
+  stk_disclosure: {layer: stock,  weight: 1, sign: 1,  horizon: 20, transform: rubric,   params: {decay_days: 20}, llm: true, source: "국내 공시 사건 연구 (유상증자 유형별 반응, 실적 발표 후 드리프트)"}
+  news_risk:      {layer: sector, weight: 0, sign: 1,  horizon: 5,  transform: rubric,   params: {decay_days: 5}, llm: true, source: "정치 테마주 반응이 이벤트마다 비일관 (19·20대 대선 연구) → 관찰 요인"}
+
+# 눈금 변환 (결정 9, 설계 5.1). 시장 계층은 as_of 이전 최근 N년 분포에서의 백분위를 쓴다.
+# min_history 는 그 분포를 믿기 위한 최소 관측 수 — 모자라면 점수를 지어내지 않고 결측으로 둔다.
+normalize:
+  hist_window_years: 5
+  min_history: 60
+  # 창 길이 대비 최소 관측 비율. 250거래일 중 30일치만 있는 신규 상장 종목의 '52주 고가 대비
+  # 위치'는 다른 종목과 같은 뜻이 아니다 — 지어내지 않고 결측으로 둔다.
+  min_obs_ratio: 0.6
+
+# 종목 종합 점수 = 종목 계층 점수 + sector_tilt × 소속 섹터 점수 (설계 5.3).
+# 시장 점수는 모든 종목에 같은 값이라 더하지 않는다 — 1단계 위험자산 비중이 그 자리다.
+combine:
+  sector_tilt: 0.25
+
+# 점수 → 목표 비중 (결정 10, 설계 6.1). 위험자산은 "위험한 종목"이 아니라 가격이 변동하는 자산 전체다.
+# risk_weight = clip(risk_base + risk_slope × 시장 점수, risk_min, risk_max), 나머지는 현금 대용 ETF.
+# sector_share/(1-sector_share) 의 위성 몫 분할은 결정 10에 없던 세부라 v0 설정값으로 새로 정한 것이다 (설계 12장, 검토 필요).
+# exit_rank: 보유 종목은 종합 점수 순위가 이 등수 밖으로 밀릴 때만 뺀다 (회전율 억제).
+# rebalance_band: 목표와 현재 비중 차이가 이보다 작으면 거래하지 않는다. 신규 편입·전량 제외는 예외.
+allocate:
+  risk_base: 0.50
+  risk_slope: 0.40
+  risk_min: 0.10
+  risk_max: 0.90
+  core_share: 0.50
+  sector_share: 0.30
+  n_sectors: 2
+  n_stocks: 10
+  stock_cap: 0.05
+  exit_rank: 30
+  rebalance_band: 0.05
+
+# 가상 체결 비용 (결정 11, 설계 6.2). 모두 편도. 거래세는 주식 매도에만 붙고 ETF 는 면제다.
+# 세율은 2차 출처 기준이라 1차 공고로 재확인이 필요하다 (설계 12장).
+costs:
+  slippage: 0.0010
+  fee: 0.00015
+  tax_stock_sell: 0.0020
+
+# 채점 (결정 5). 요인마다 주 기간 하나(factors.horizon)에 더해 공통 보조 기간을 함께 기록한다.
+scoring:
+  aux_horizons: [5, 20]
+  # 그날 단면이 이보다 적으면 순위 상관을 내지 않는다 (섹터는 7개뿐이다).
+  min_cross_section: 5
+  n_buckets: 5                    # 점수 구간별 평균 초과 수익 (5분위)
+  # 종합 점수를 채점할 기간. null 이면 scoring.aux_horizons 를 그대로 쓴다.
+  composite_horizons: null
+  risk_flag_horizon: 20           # 위험 표시 채점: 이후 며칠의 낙폭·변동성을 보는가
+  trading_days_per_year: 252      # 변동성 연율화 계수
+
+# 가상 포트폴리오 회계 (설계 6.2). 비중 기준이라 주 수 반올림이 없다.
+portfolio:
+  start_nav: 1.0                  # 초기 NAV
+  trading_days_per_year: 252      # 변동성 연율화 계수
+  default_kind: "stock"           # universe 에 없는 자산의 종류 — 거래세를 무는 쪽으로 보수적으로
+
+# 기준선 포트폴리오 (결정 14, 설계 6.3). 시스템과 같은 체결·비용 함수로 돈다.
+baselines:
+  sma_series: "KOSPI"             # 이동평균 규칙이 보는 시장 계열 (market_daily.series)
+  sma_ma_days: 200                # factors.mkt_trend.params.ma_days 가 없을 때만 쓰는 값
+  core_weight_6040: 0.60          # 60/40 의 주식 몫
+
+# 배치 진행 출력 (기록이 아니라 눈으로 보는 값).
+run:
+  log_top_n: 5                    # 목표 비중을 몇 개까지 한 줄에 보여 줄 것인가
+
+# 도전 가중치 안 사후 재평가 (결정 6, 설계 7.3). 겹침 보정 유효 표본이 이보다 적으면 비교를 "판단 불가"로 둔다.
+reeval:
+  min_n_eff: 12
+  horizon: 20                     # 비교에 쓰는 채점 기간(거래일). 종합 점수의 주 기간에 해당한다
+  min_cross_section: 5            # 그날 단면이 이보다 적으면 순위 상관을 내지 않는다
+  nav_tolerance: 0.0              # '비용 반영 NAV 가 나쁘지 않을 것' 의 허용 폭
+
+# LLM (결정 15). 실패·예산 초과는 기권(조정 없음)이고 v0 판단만 기록된다 — 중립 판단과 구분한다.
+# adj_cap: 종합 점수 조정 상한 ±0.2 (결정 4·12). top_n: 조정 대상 상위 종목 수.
+llm:
+  enabled: true
+  provider: gemini
+  api_key_env: GEMINI_API_KEY
+  daily_budget_usd: 1.0
+  top_n: 20
+  adj_cap: 0.2
+  timeout_sec: 60
+  retries: 1
+  temperature: 0.0
+  models:
+    classify: "gemini-3.5-flash-lite"   # 건수가 많고 단순한 분류 (공시 채점·뉴스 분류)
+    adjust: "gemini-3.5-flash"          # 맥락을 함께 보는 조정
+  prompt_ver: "v1"
+  # 100만 토큰당 단가(USD). 2026-09-22 공식 가격표에서 확인해 채웠다.
+  # 출력 단가에는 **사고(thinking) 토큰**이 포함된다 — client.py 가 thoughts 를 출력에 더해 센다.
+  price_per_mtok:
+    "gemini-3.5-flash-lite": {in: 0.30, out: 2.50}
+    "gemini-3.5-flash":      {in: 1.50, out: 9.00}
+  # --- 호출 한도. 단가를 몰라 비용 합이 0 으로 남는 경우를 대비해 호출 수 상한을 함께 둔다.
+  max_calls_per_day: 400
+  disclosure_max_calls: 40        # 한 실행에서 공시 채점에 쓸 최대 호출 수 (넘는 건은 결측으로 남는다)
+  news_max_calls: 8
+  # --- 공시 채점 (설계 5.4)
+  supply_large_ratio_pct: 10.0    # 공급계약을 '대규모'로 볼 최근매출액 대비 비율(%)
+  disclosure_fallback_hour: 18    # first_seen_at 이 빈 공시를 몇 시에 알았다고 볼 것인가
+  body_max_chars: 1200            # 프롬프트에 넣을 공시 본문 길이 상한
+  # 코드가 보는 지배구조 위험 문구. LLM 이 본문에서 같은 말을 인용해도 같은 표시를 붙인다 (설계 5.5).
+  governance_pattern: '횡령|배임|감사의견|의견\s*거절|부적정|한정'
+  # --- 뉴스 분류 (설계 5.2의 news_risk)
+  news_batch_size: 30             # 한 번에 묶어 보내는 헤드라인 수 (묶을수록 싸다)
+  news_max_items: 120
+  # 이미 일어난 가격·거래량을 전하는 자동 기사. 부르기 전에 걸러 호출 수를 줄인다.
+  # '급등·강세' 같은 낱말은 단독으로 넣지 않는다 — "유가 급등"처럼 진짜 사건을 전하는 제목이 통째로 걸린다.
+  news_noise_pattern: '특징주|시황|증시\s*(마감|개장|출발)|장\s*마감|마감\s*시황|수급\s*포착|순매수|순매도|신고가|신저가|52주|거래량\s*급증|급등세|급락세|급등락|상한가|하한가|\d+\s*거래일\s*연속|[-+]?\d+(\.\d+)?\s*%\s*(상승|하락|↑|↓)|코스피\s*\d|코스닥\s*\d'
+  # --- 조정 (설계 5.6). 설계는 "1~2회로 끝낸다"이다 (비용·일관성).
+  adjust_max_assets_per_call: 20
+  adjust_max_calls: 2
+  evidence_max_chars: 120         # 프롬프트에 넣을 근거 요약 한 줄의 길이 상한
+
+# 공시 채점 기준표 (결정 12). level 은 -2~+2 의 5단계이고 2로 나눠 -1~+1 눈금으로 쓴다.
+# decided_by: code 는 newsgap.disclosure 의 유형·비율만으로 확정되는 경우라 LLM 을 부르지 않는다 (설계 5.4).
+# 숫자를 뽑을 수 있는 것은 코드가, 글로 판단할 것만 LLM 이 맡는다 (결정 3).
+disclosure_rubric:
+  - {id: rights_public,   kind: 유상증자,   level: -2, decided_by: code, desc: "유상증자 일반공모·주주배정"}
+  - {id: rights_third,    kind: 유상증자,   level: 1,  decided_by: code, desc: "제3자 배정 유상증자"}
+  - {id: convertible,     kind: 전환사채,   level: -1, decided_by: code, desc: "전환사채·신주인수권부사채 발행"}
+  - {id: supply_large,    kind: 공급계약,   level: 1,  decided_by: code, desc: "대규모 공급계약 (최근매출액 대비 10% 이상, ratio_ok)"}
+  - {id: supply_small,    kind: 공급계약,   level: 0,  decided_by: code, desc: "매출 대비 10% 미만 공급계약"}
+  - {id: earnings_up,     kind: 실적,       level: 2,  decided_by: llm,  desc: "실적 잠정치가 전년 대비 큰 폭 개선"}
+  - {id: earnings_down,   kind: 실적,       level: -2, decided_by: llm,  desc: "실적 잠정치가 전년 대비 큰 폭 악화"}
+  - {id: buyback,         kind: 자기주식,   level: 1,  decided_by: code, desc: "자기주식 취득·소각"}
+  - {id: routine,         kind: 기타,       level: 0,  decided_by: code, desc: "단순 정정·정기 보고"}
+  - {id: other_material,  kind: 주요경영사항, level: 0, decided_by: llm, desc: "투자판단 관련 주요경영사항·미분류 — LLM 이 수준을 정한다"}
+
+# 코드가 만드는 위험 표시 (설계 5.5). 표시는 점수와 별개이고 halt 만 v0 에서도 후보에서 제외한다.
+# spike: 최근 spike_days 거래일 누적 수익률의 절댓값이 spike_abs_ret 이상이면 급등락으로 표시.
+risk_flags:
+  spike_days: 5
+  spike_abs_ret: 0.30
+  # 공시를 '최근'으로 볼 거래일 수. 거래정지·시장조치는 며칠 안에 해제되기도 해서 짧게 둔다.
+  recent_days: 5
+  # first_seen_at 이 없는 공시를 몇 시에 알았다고 볼 것인가 (DART 배포 종료 시각).
+  disclosure_fallback_hour: 18
+  # 코드가 판정하는 지배구조 위험 제목 패턴. LLM 판정은 같은 flag_type 으로 덧붙는다.
+  governance_pattern: '횡령|배임|감사의견|의견거절|한정'
+  # 공시 유형 → 표시. newsgap.disclosure.kind_of 가 내는 이름과 같아야 한다.
+  halt_kinds: ["거래정지", "상장폐지"]
+  market_action_kinds: ["시장조치"]

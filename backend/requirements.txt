@@ -1,0 +1,17 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+requests>=2.32,<3.0
+python-dotenv>=1.0,<2.0
+
+# 뉴스 자동매매 모드 (LS 실시간 웹소켓 수집기)
+pyyaml>=6.0,<7.0
+websockets>=13
+aiohttp>=3.9,<4.0
+google-genai>=1.0
+
+# 판단 지원(advisor) 모드 (시세·수급·밤사이 시장 수집)
+pandas>=2.3,<3.0
+numpy>=2.5,<3.0
+pykrx>=1.2.9,<1.3
+finance-datareader>=0.9.202,<0.10
+yfinance>=1.7,<2.0
